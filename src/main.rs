@@ -1,5 +1,4 @@
-use nom::{Err, IResult, Parser, branch::alt, bytes::complete::{tag}, character::{complete::{alphanumeric1, digit1, multispace0}}, combinator::{not, opt, recognize, value}, error::{Error, ErrorKind, ParseError}, multi::many0, sequence::{delimited, pair}};
-
+use nom::{IResult, branch::alt, bytes::complete::{tag}, character::{complete::{alphanumeric1, digit1, multispace0}}, combinator::{not, opt, recognize, value}, error::{ParseError}, multi::many0, sequence::{delimited, pair}};
 
 /// Represents a value assignment
 /// Grammar:
@@ -21,9 +20,29 @@ pub enum Expression<'a> {
     Identifier(&'a str),
     /// Binding of a value to a string
     /// E.g.: `let x = 5;`  
-    Binding(Box<Assignment<'a>>),
+    Assignment(Box<Assignment<'a>>),
     Boolean(bool),
     Integer(i64)
+}
+
+impl <'a> Expression<'a> {
+    /// Returns the inner identifier of this expression.
+    /// Panics if the expression variant is _not_ Identifier
+    pub fn identifier(&self) -> &str {
+        match self {
+            Expression::Identifier(ident) => ident,
+            _ => panic!("called Expression::identifier on non-Identifier variant")
+        }
+    }
+}
+
+pub fn parse_expression<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
+    alt((
+        parse_bool,
+        parse_integer,
+        parse_assignment,
+        parse_identifier
+    ))(input)
 }
 
 /// Stolen from nom Recipes
@@ -43,12 +62,12 @@ fn ws<'a, F: 'a, O, E: ParseError<&'a str>>(inner: F) -> impl FnMut(&'a str) -> 
 /// Parses a type annotation of the form:
 /// `[pest] type_annotation = { ":" ~ identifier }`
 /// Returns the type identifier only
-pub fn parse_type_annotation<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
+pub fn parse_type_annotation<'a>(input: &'a str) -> IResult<&str, &str> {
     // Parse the colon (':')
     let (remainder, _colon) = ws(tag(":"))(input)?;
     
     // Parse the identifier
-    let (remainder, type_annotation) = ws(parse_identifier)(remainder)?;
+    let (remainder, type_annotation) = ws(parse_identifier_str)(remainder)?;
 
     Ok(
         (remainder, type_annotation)
@@ -65,7 +84,7 @@ pub fn parse_assignment<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
     let (remainder, _let) = ws(tag("let"))(input)?;
 
     // Parsing the identifier for this assignment
-    let (remainder, identifier) = ws(parse_identifier)(remainder)?;
+    let (remainder, identifier) = ws(parse_identifier_str)(remainder)?;
 
     // Parse the type annotation, if it exists
     let (remainder, maybe_type_annotation) = opt(parse_type_annotation)(remainder)?;
@@ -74,11 +93,18 @@ pub fn parse_assignment<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
     let (remainder, _let) = ws(tag("="))(remainder)?;
 
     // Parse the expression being bound
-    // TODO
+    let (remainder, expression) = parse_expression(remainder)?;
+
+    let assignment = Box::new(Assignment {
+        // Safety: the Expressioon returned by `parse_identifier` is always of the variant `Identifier`
+        name: identifier,
+        type_annotation: maybe_type_annotation,
+        expression,
+    });
 
     dbg!(remainder, &identifier, maybe_type_annotation);
 
-    Ok((remainder, identifier))
+    Ok((remainder, Expression::Assignment(assignment)))
 }
 
 fn parse_raw_bool(input: &str) -> IResult<&str, bool> {
@@ -122,22 +148,23 @@ pub fn parse_integer<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
     )
 }
 
-/// Parses an alphanumeric identifier whose name starts with 
-pub fn identifier_parser<'a, E: ParseError<&'a str>>() -> impl Parser<&'a str, &'a str, E> {
-    recognize(
+/// Parses an alphanumeric identifier whose name does not start with a digit
+pub fn parse_identifier_str<'a>(input: &'a str) -> IResult<&str, &'a str> {
+    let (tail, identifier) = recognize(
         pair(
             // Make sure that the identifier does not _start_ with a digit
             not(digit1),
             // Get an alphanumeric sequence of at least one element
             alphanumeric1
         )
-    )   
+    )(input)?;
+
+    Ok((tail, identifier))
 }
 
-/// Parses an alphanumeric identifier whose name starts with 
+/// Parses an alphanumeric identifier whose name does not start with a digit
 pub fn parse_identifier<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
-
-    let (tail, identifier) = identifier_parser().parse(input)?;
+    let (tail, identifier) = parse_identifier_str(input)?;
 
     Ok((tail, Expression::Identifier(identifier)))
 }
@@ -145,9 +172,8 @@ pub fn parse_identifier<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
 #[cfg(test)]
 mod tests {
 
-    use nom::Parser;
 
-    use crate::{Expression, identifier_parser, parse_bool, parse_identifier, parse_integer, parse_raw_bool, parse_type_annotation};
+    use crate::{Expression, parse_bool, parse_identifier, parse_integer, parse_raw_bool, parse_type_annotation};
 
     #[test]
     fn parses_integer() {
@@ -265,7 +291,7 @@ mod tests {
     fn parses_type_annotation() {
         assert_eq!(
             parse_type_annotation(": int"),
-            Ok(("", Expression::Identifier("int")))
+            Ok(("", "int"))
         );
 
         assert!(
@@ -279,7 +305,7 @@ mod tests {
 }
 
 fn main() {
-    parse_assignment("let hm = 4");
+    dbg!(parse_assignment("let x = 5"));
 
-    parse_assignment("let hm: int = 4");
+    dbg!(parse_assignment("let x: int = 5"));
 }
