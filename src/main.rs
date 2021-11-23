@@ -1,4 +1,16 @@
-use nom::{IResult, branch, bytes::complete, character::{self, complete::{alphanumeric1, digit1, multispace0}}, combinator::{not, opt, recognize, value}, error::ParseError, multi::many0, sequence::{self, delimited, pair}};
+use nom::character::complete::char;
+use nom::{
+    branch,
+    bytes::complete::{self, take},
+    character::{
+        self,
+        complete::{alphanumeric1, digit1, multispace0},
+    },
+    combinator::{not, opt, recognize, value},
+    error::ParseError,
+    sequence::{self, delimited, pair},
+    IResult,
+};
 
 /// Represents a value assignment
 /// Grammar:
@@ -28,6 +40,7 @@ pub enum Expression<'a> {
     /// }
     Boolean(bool),
     Integer(i64),
+    Char(&'a str),
 }
 
 impl<'a> Expression<'a> {
@@ -39,6 +52,12 @@ impl<'a> Expression<'a> {
             _ => panic!("called Expression::identifier on non-Identifier variant"),
         }
     }
+}
+
+pub fn parse_char<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
+    let (remainder, parsed_char) = delimited(char('('), take(1usize), char(')'))(input)?;
+
+    Ok((remainder, Expression::Char(parsed_char)))
 }
 
 pub fn parse_expression<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
@@ -85,7 +104,7 @@ pub fn parse_assignment<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
     let (remainder, _let) = ws(complete::tag("let"))(input)?;
 
     // Parsing the identifier for this assignment
-    let (remainder, identifier) = ws(parse_identifier_str)(remainder)?;
+    let (remainder, identifier) = ws(parse_identifier_str)(remainder)?; 
 
     // Parse the type annotation, if it exists
     let (remainder, maybe_type_annotation) = opt(parse_type_annotation)(remainder)?;
@@ -97,7 +116,6 @@ pub fn parse_assignment<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
     let (remainder, expression) = parse_expression(remainder)?;
 
     let assignment = Box::new(Assignment {
-        // Safety: the Expressioon returned by `parse_identifier` is always of the variant `Identifier`
         name: identifier,
         type_annotation: maybe_type_annotation,
         expression,
@@ -110,10 +128,10 @@ pub fn parse_assignment<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
 
 fn parse_raw_bool(input: &str) -> IResult<&str, bool> {
     // Returns true if the given input is "true"
-    let parse_true = value(true, complete::tag("true"));
+    let parse_true = value(true, ws(complete::tag("true")));
 
     // Returns false if the given input is "false"
-    let parse_false = value(false, complete::tag("false"));
+    let parse_false = value(false, ws(complete::tag("false")));
 
     branch::alt((parse_true, parse_false))(input)
 }
@@ -125,7 +143,6 @@ pub fn parse_bool<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
 }
 
 pub fn parse_integer<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
-
     let (remainder, parsed) = ws(character::complete::i64)(input)?;
 
     Ok((remainder, Expression::Integer(parsed)))
@@ -153,7 +170,15 @@ pub fn parse_identifier<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
 #[cfg(test)]
 mod tests {
 
-    use crate::{Assignment, Expression, parse_assignment, parse_bool, parse_identifier, parse_integer, parse_raw_bool, parse_type_annotation};
+    use crate::{
+        parse_assignment, parse_bool, parse_char, parse_identifier, parse_integer, parse_raw_bool,
+        parse_type_annotation, Assignment, Expression,
+    };
+
+    #[test]
+    fn parses_char() {
+        assert_eq!(parse_char(" 'z'"), Ok(("", Expression::Char("z"))));
+    }
 
     #[test]
     fn parses_integer() {
@@ -176,12 +201,12 @@ mod tests {
     fn parses_bool() {
         assert_eq!(
             parse_bool("true false"),
-            Ok((" false", Expression::Boolean(true)))
+            Ok(("false", Expression::Boolean(true)))
         );
 
         assert_eq!(
             parse_bool("false true"),
-            Ok((" true", Expression::Boolean(false)))
+            Ok(("true", Expression::Boolean(false)))
         );
 
         assert_eq!(parse_bool("false"), Ok(("", Expression::Boolean(false))));
@@ -196,9 +221,9 @@ mod tests {
 
     #[test]
     fn parses_raw_bool() {
-        assert_eq!(parse_raw_bool("true false"), Ok((" false", true)));
+        assert_eq!(parse_raw_bool("true false"), Ok(("false", true)));
 
-        assert_eq!(parse_raw_bool("false true"), Ok((" true", false)));
+        assert_eq!(parse_raw_bool("false true"), Ok(("true", false)));
 
         assert_eq!(parse_raw_bool("false"), Ok(("", false)));
 
@@ -241,7 +266,6 @@ mod tests {
 
     #[test]
     fn parses_assignment() {
-
         let assign_5_to_x = Assignment {
             name: "x",
             type_annotation: None,
