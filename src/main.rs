@@ -1,4 +1,4 @@
-use nom::{IResult, branch, bytes::complete, character::complete::{alphanumeric1, digit1, multispace0}, combinator::{not, opt, recognize, value}, error::ParseError, multi::many0, sequence::{self, delimited, pair}};
+use nom::{IResult, branch, bytes::complete, character::{self, complete::{alphanumeric1, digit1, multispace0}}, combinator::{not, opt, recognize, value}, error::ParseError, multi::many0, sequence::{self, delimited, pair}};
 
 /// Represents a value assignment
 /// Grammar:
@@ -22,7 +22,10 @@ pub enum Expression<'a> {
     /// E.g.: `let x = 5;`  
     Assignment(Box<Assignment<'a>>),
     /// A boolean value, either true or false
-    /// 
+    /// Grammar:
+    /// boolean = _{
+    ///    True | False
+    /// }
     Boolean(bool),
     Integer(i64),
 }
@@ -122,21 +125,10 @@ pub fn parse_bool<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
 }
 
 pub fn parse_integer<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
-    // recognize will return the matched string of the underlying parser
-    let (tail, parsed_int) = recognize(
-        // pair returns a tuple of the result of both parsers
-        pair(
-            // Either a minus or a sequence of digits
-            branch::alt((complete::tag("-"), digit1)),
-            // A sequence of digits or nothing
-            many0(digit1),
-        ),
-    )(input)?;
 
-    // TODO: make this an error whenever we set up custom error treatment
-    let parsed_int = parsed_int.parse().expect("Number too large!");
+    let (remainder, parsed) = ws(character::complete::i64)(input)?;
 
-    Ok((tail, Expression::Integer(parsed_int)))
+    Ok((remainder, Expression::Integer(parsed)))
 }
 
 /// Parses an alphanumeric identifier whose name does not start with a digit
@@ -167,12 +159,12 @@ mod tests {
     fn parses_integer() {
         assert_eq!(
             parse_integer("123456789 false"),
-            Ok((" false", Expression::Integer(123456789)))
+            Ok(("false", Expression::Integer(123456789)))
         );
 
         assert_eq!(
             parse_integer("9999999999 false"),
-            Ok((" false", Expression::Integer(9999999999)))
+            Ok(("false", Expression::Integer(9999999999)))
         );
 
         assert_eq!(parse_integer("0"), Ok(("", Expression::Integer(0))));
