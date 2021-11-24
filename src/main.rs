@@ -1,3 +1,5 @@
+mod structs;
+
 use nom::character::complete::char;
 use nom::{
     branch,
@@ -11,6 +13,7 @@ use nom::{
     sequence::{self, delimited, pair},
     IResult,
 };
+use structs::StructDefinition;
 
 /// Represents a value assignment
 /// Grammar:
@@ -30,8 +33,11 @@ pub struct Assignment<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expression<'a> {
     Identifier(&'a str),
-    /// Binding of a value to a string
-    /// E.g.: `let x = 5;`  
+    /// Binding of a value to a name
+    /// Grammar
+    /// assignment = {
+	///     "let" ~ identifier ~ type_annotation? ~ "=" ~ expression
+    /// }
     Assignment(Box<Assignment<'a>>),
     /// A boolean value, either true or false
     /// Grammar:
@@ -41,6 +47,12 @@ pub enum Expression<'a> {
     Boolean(bool),
     Integer(i64),
     Char(&'a str),
+    /// The definition of a struct
+    /// Grammar:
+    /// struct_definition = {
+    ///     "pub"? ~ "struct" ~ identifier ~ "{" ~ (struct_field ~ ",")* ~ struct_field? ~ "}"
+    /// }
+    Struct(StructDefinition<'a>)
 }
 
 impl<'a> Expression<'a> {
@@ -54,8 +66,9 @@ impl<'a> Expression<'a> {
     }
 }
 
+
 pub fn parse_char<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
-    let (remainder, parsed_char) = delimited(char('('), take(1usize), char(')'))(input)?;
+    let (remainder, parsed_char) = delimited(char('\''), take(1usize), char('\''))(input)?;
 
     Ok((remainder, Expression::Char(parsed_char)))
 }
@@ -81,9 +94,12 @@ where
     sequence::delimited(multispace0, inner, multispace0)
 }
 
-/// Parses a type annotation of the form:
-/// `[pest] type_annotation = { ":" ~ identifier }`
-/// Returns the type identifier only
+/// Parses a type annotation and returns only its type identifier
+/// 
+/// # Grammar: 
+/// ``````markdown
+/// type_annotation = { ":" ~ identifier }
+/// ``````
 pub fn parse_type_annotation<'a>(input: &'a str) -> IResult<&str, &str> {
     // Parse the colon (':')
     let (remainder, _colon) = ws(complete::tag(":"))(input)?;
@@ -94,11 +110,15 @@ pub fn parse_type_annotation<'a>(input: &'a str) -> IResult<&str, &str> {
     Ok((remainder, type_annotation))
 }
 
-/// Parses an assignment of the form
+/// Parses a variable assignment and returns [`Expression::Assignment`]
+/// 
+/// # Grammar
+/// 
+/// ``````markdown
 /// assignment = {
 ///	   "let" ~ identifier ~ type_annotation? ~ "=" ~ expression
 /// }
-/// (WIP)
+/// ``````
 pub fn parse_assignment<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
     // Parsing the "let" keyword
     let (remainder, _let) = ws(complete::tag("let"))(input)?;
@@ -126,22 +146,17 @@ pub fn parse_assignment<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
     Ok((remainder, Expression::Assignment(assignment)))
 }
 
-fn parse_raw_bool(input: &str) -> IResult<&str, bool> {
+fn parse_bool<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
     // Returns true if the given input is "true"
-    let parse_true = value(true, ws(complete::tag("true")));
+    let parse_true = value(Expression::Boolean(true), ws(complete::tag("true")));
 
     // Returns false if the given input is "false"
-    let parse_false = value(false, ws(complete::tag("false")));
+    let parse_false = value(Expression::Boolean(false), ws(complete::tag("false")));
 
     branch::alt((parse_true, parse_false))(input)
 }
 
-pub fn parse_bool<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
-    let (remainder, parsed_bool) = parse_raw_bool(input)?;
-
-    Ok((remainder, Expression::Boolean(parsed_bool)))
-}
-
+/// Parses a signed integer of maximum value [`i64::MAX`] and minimum value [`i64::MIN`]
 pub fn parse_integer<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
     let (remainder, parsed) = ws(character::complete::i64)(input)?;
 
@@ -171,7 +186,7 @@ pub fn parse_identifier<'a>(input: &'a str) -> IResult<&str, Expression<'a>> {
 mod tests {
 
     use crate::{
-        parse_assignment, parse_bool, parse_char, parse_identifier, parse_integer, parse_raw_bool,
+        parse_assignment, parse_bool, parse_char, parse_identifier, parse_integer,
         parse_type_annotation, Assignment, Expression,
     };
 
@@ -216,23 +231,6 @@ mod tests {
         let wrong_bools = ["tru", "fals", "truth", "True", "False"];
         for wrong in wrong_bools {
             parse_bool(wrong).unwrap_err();
-        }
-    }
-
-    #[test]
-    fn parses_raw_bool() {
-        assert_eq!(parse_raw_bool("true false"), Ok(("false", true)));
-
-        assert_eq!(parse_raw_bool("false true"), Ok(("true", false)));
-
-        assert_eq!(parse_raw_bool("false"), Ok(("", false)));
-
-        assert_eq!(parse_raw_bool("true"), Ok(("", true)));
-
-        // TODO: what about "truee" and "falsee" ?
-        let wrong_bools = ["tru", "fals", "truth", "True", "False"];
-        for wrong in wrong_bools {
-            parse_raw_bool(wrong).unwrap_err();
         }
     }
 
